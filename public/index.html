@@ -1,0 +1,82 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <title>Piedra Papel Tijera - Login</title>
+    <style>
+        body { font-family: sans-serif; padding: 20px; }
+        .box { border: 1px solid #ccc; padding: 15px; margin-bottom: 20px; width: 300px; }
+        input { display: block; margin: 5px 0; width: 90%; padding: 5px; }
+        button { cursor: pointer; padding: 5px 10px; }
+        #mensaje { color: blue; font-weight: bold; }
+    </style>
+</head>
+<body>
+    <h1>Bienvenido al Juego</h1>
+
+    <div class="box">
+        <h3>Registro</h3>
+        <input type="text" id="regUser" placeholder="Usuario">
+        <input type="password" id="regPass" placeholder="Contraseña">
+        <button onclick="registrar()">Registrarse</button>
+    </div>
+
+    <div class="box">
+        <h3>Login</h3>
+        <input type="text" id="loginUser" placeholder="Usuario">
+        <input type="password" id="loginPass" placeholder="Contraseña">
+        <button onclick="login()">Entrar</button>
+    </div>
+
+    <p id="mensaje"></p>
+
+    <script>
+        async function registrar() {
+            const username = document.getElementById('regUser').value;
+            const password = document.getElementById('regPass').value;
+
+            const res = await fetch('/api/auth/register', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ username, password })
+            });
+
+            const data = await res.json();
+            
+            if (res.ok) {
+                document.getElementById('mensaje').innerText = "✅ " + data.message;
+            } else {
+                document.getElementById('mensaje').innerText = "❌ " + data.error;
+            }
+        }
+
+        
+        async function login() {
+            const username = document.getElementById('loginUser').value;
+            const password = document.getElementById('loginPass').value;
+
+            const res = await fetch('/api/auth/login', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ username, password })
+            });
+
+            const data = await res.json();
+
+            if (res.ok) {
+                document.getElementById('mensaje').innerText = "Login correcto. Token recibido.";
+                console.log("Token:", data.token);
+                
+                
+                localStorage.setItem('token', data.token);
+                localStorage.setItem('username', username);
+                
+                
+                setTimeout(() => alert("¡Login exitoso! Listo para jugar."), 100);
+            } else {
+                document.getElementById('mensaje').innerText = "❌ " + data.error;
+            }
+        }
+    </script>
+</body>
+</html>
