@@ -2,7 +2,7 @@
 <html lang="es">
 <head>
     <meta charset="UTF-8">
-    <title>Piedra Papel Tijera - Login</title>
+    <title>Piedra Papel Tijera</title>
     <style>
         body { font-family: sans-serif; padding: 20px; }
         .box { border: 1px solid #ccc; padding: 15px; margin-bottom: 20px; width: 300px; }
@@ -10,6 +10,7 @@
         button { cursor: pointer; padding: 5px 10px; }
         #mensaje { color: blue; font-weight: bold; }
     </style>
+    <script src="/socket.io/socket.io.js"></script>
 </head>
 <body>
     <h1>Bienvenido al Juego</h1>
@@ -31,6 +32,8 @@
     <p id="mensaje"></p>
 
     <script>
+        let socket;
+
         async function registrar() {
             const username = document.getElementById('regUser').value;
             const password = document.getElementById('regPass').value;
@@ -50,7 +53,6 @@
             }
         }
 
-        
         async function login() {
             const username = document.getElementById('loginUser').value;
             const password = document.getElementById('loginPass').value;
@@ -64,18 +66,30 @@
             const data = await res.json();
 
             if (res.ok) {
-                document.getElementById('mensaje').innerText = "Login correcto. Token recibido.";
-                console.log("Token:", data.token);
-                
-                
+                document.getElementById('mensaje').innerText = "✅ Login correcto.";
                 localStorage.setItem('token', data.token);
-                localStorage.setItem('username', username);
-                
-                
-                setTimeout(() => alert("¡Login exitoso! Listo para jugar."), 100);
+                conectarSocket(data.token);
             } else {
                 document.getElementById('mensaje').innerText = "❌ " + data.error;
             }
+        }
+
+        function conectarSocket(token) {
+            if(socket) socket.disconnect();
+            
+            socket = io({
+                auth: { token: token }
+            });
+
+            socket.on("connect", () => {
+                console.log("Conectado al servidor de WebSockets");
+                document.getElementById('mensaje').innerText += " (Conectado a Socket)";
+            });
+
+            socket.on("connect_error", (err) => {
+                console.log("Error:", err.message);
+                document.getElementById('mensaje').innerText = "❌ Error Socket: " + err.message;
+            });
         }
     </script>
 </body>
