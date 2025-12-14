@@ -2,95 +2,248 @@
 <html lang="es">
 <head>
     <meta charset="UTF-8">
-    <title>Piedra Papel Tijera</title>
+    <title>Piedra Papel Tijera - Lobby</title>
     <style>
-        body { font-family: sans-serif; padding: 20px; }
-        .box { border: 1px solid #ccc; padding: 15px; margin-bottom: 20px; width: 300px; }
-        input { display: block; margin: 5px 0; width: 90%; padding: 5px; }
-        button { cursor: pointer; padding: 5px 10px; }
-        #mensaje { color: blue; font-weight: bold; }
+        body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; padding: 20px; background-color: #f0f0f0; }
+        .container { max-width: 800px; margin: 0 auto; background: white; padding: 20px; border-radius: 8px; box-shadow: 0 2px 10px rgba(0,0,0,0.1); }
+        
+        .hidden { display: none; }
+        
+        input { padding: 10px; margin: 5px 0; width: 70%; border: 1px solid #ddd; border-radius: 4px; }
+        button { padding: 10px 20px; cursor: pointer; background-color: #007bff; color: white; border: none; border-radius: 4px; margin: 5px; }
+        button:hover { background-color: #0056b3; }
+        button.secondary { background-color: #6c757d; }
+        button.danger { background-color: #dc3545; }
+        
+        .game-list { list-style: none; padding: 0; }
+        .game-item { border: 1px solid #ddd; padding: 10px; margin-bottom: 5px; display: flex; justify-content: space-between; align-items: center; background: #fafafa; }
+        
+        #error-msg { color: red; font-weight: bold; margin-top: 10px; }
+        .status-bar { background: #e9ecef; padding: 10px; margin-bottom: 20px; border-radius: 4px; }
     </style>
     <script src="/socket.io/socket.io.js"></script>
 </head>
 <body>
-    <h1>Bienvenido al Juego</h1>
 
-    <div class="box">
-        <h3>Registro</h3>
-        <input type="text" id="regUser" placeholder="Usuario">
-        <input type="password" id="regPass" placeholder="Contraseña">
-        <button onclick="registrar()">Registrarse</button>
-    </div>
+<div class="container">
+    <h1 id="main-title">Piedra, Papel, Tijera</h1>
+    <div id="error-msg"></div>
 
-    <div class="box">
-        <h3>Login</h3>
-        <input type="text" id="loginUser" placeholder="Usuario">
-        <input type="password" id="loginPass" placeholder="Contraseña">
+    <div id="auth-screen">
+        <h2>Acceso</h2>
+        <input type="text" id="username" placeholder="Usuario">
+        <input type="password" id="password" placeholder="Contraseña">
+        <br>
         <button onclick="login()">Entrar</button>
+        <button class="secondary" onclick="register()">Registrarse</button>
     </div>
 
-    <p id="mensaje"></p>
+    <div id="lobby-screen" class="hidden">
+        <div class="status-bar">
+            Hola, <b id="display-user">Usuario</b>. 
+            <button class="secondary" style="padding: 5px 10px; float: right;" onclick="logout()">Salir</button>
+        </div>
 
-    <script>
-        let socket;
+        <div style="display: flex; gap: 20px;">
+            <div style="flex: 1;">
+                <h3>Crear Partida</h3>
+                <button onclick="crearPartida('cpu')" style="width: 100%">🤖 Contra la Máquina</button>
+                <button onclick="crearPartida('humano')" style="width: 100%">👤 Contra Humano</button>
+            </div>
 
-        async function registrar() {
-            const username = document.getElementById('regUser').value;
-            const password = document.getElementById('regPass').value;
+            <div style="flex: 1; border-left: 1px solid #ccc; padding-left: 20px;">
+                <h3>Partidas Disponibles</h3>
+                <p style="font-size: 0.9em; color: #666;">(Se actualiza en tiempo real)</p>
+                <ul id="lista-partidas" class="game-list">
+                    <li>Cargando...</li>
+                </ul>
+            </div>
+        </div>
+    </div>
 
-            const res = await fetch('/api/auth/register', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ username, password })
-            });
+    <div id="game-screen" class="hidden">
+        <h2>🎮 En Partida</h2>
+        <h3 id="game-info">Esperando oponente...</h3>
+        <p>ID de Partida: <span id="current-game-id">-</span></p>
+        <hr>
+        <div style="text-align: center; padding: 50px;">
+            <h2>AQUÍ IRÁ EL TABLERO DE JUEGO</h2>
+            <p>(Lo haremos en el siguiente paso)</p>
+            <button class="danger" onclick="abandonarPartida()">Abandonar Partida</button>
+        </div>
+    </div>
+</div>
 
-            const data = await res.json();
-            
-            if (res.ok) {
-                document.getElementById('mensaje').innerText = "✅ " + data.message;
-            } else {
-                document.getElementById('mensaje').innerText = "❌ " + data.error;
-            }
-        }
+<script>
+    let socket;
+    let token = localStorage.getItem('token');
+    let currentUser = localStorage.getItem('username');
 
-        async function login() {
-            const username = document.getElementById('loginUser').value;
-            const password = document.getElementById('loginPass').value;
+    // Inicialización al cargar la página
+    if (token && currentUser) {
+        mostrarLobby(currentUser);
+        conectarSocket(token);
+    }
 
+    /* --- FUNCIONES DE AUTH --- */
+    async function login() {
+        const u = document.getElementById('username').value;
+        const p = document.getElementById('password').value;
+        if(!u || !p) return mostrarError("Faltan datos");
+
+        try {
             const res = await fetch('/api/auth/login', {
                 method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ username, password })
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({ username: u, password: p })
             });
-
             const data = await res.json();
-
-            if (res.ok) {
-                document.getElementById('mensaje').innerText = "✅ Login correcto.";
-                localStorage.setItem('token', data.token);
-                conectarSocket(data.token);
-            } else {
-                document.getElementById('mensaje').innerText = "❌ " + data.error;
-            }
-        }
-
-        function conectarSocket(token) {
-            if(socket) socket.disconnect();
             
-            socket = io({
-                auth: { token: token }
-            });
-
-            socket.on("connect", () => {
-                console.log("Conectado al servidor de WebSockets");
-                document.getElementById('mensaje').innerText += " (Conectado a Socket)";
-            });
-
-            socket.on("connect_error", (err) => {
-                console.log("Error:", err.message);
-                document.getElementById('mensaje').innerText = "❌ Error Socket: " + err.message;
-            });
+            if(res.ok) {
+                token = data.token;
+                currentUser = u;
+                localStorage.setItem('token', token);
+                localStorage.setItem('username', currentUser);
+                mostrarLobby(currentUser);
+                conectarSocket(token);
+            } else {
+                mostrarError(data.error);
+            }
+        } catch (e) {
+            mostrarError("Error de conexión con el servidor");
         }
-    </script>
+    }
+
+    async function register() {
+        const u = document.getElementById('username').value;
+        const p = document.getElementById('password').value;
+        try {
+            const res = await fetch('/api/auth/register', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({ username: u, password: p })
+            });
+            const data = await res.json();
+            if(res.ok) alert("Registrado. Ahora haz login.");
+            else mostrarError(data.error);
+        } catch (e) {
+            mostrarError("Error de conexión");
+        }
+    }
+
+    function logout() {
+        localStorage.clear();
+        location.reload();
+    }
+
+    /* --- FUNCIONES DE INTERFAZ --- */
+    function mostrarLobby(user) {
+        document.getElementById('auth-screen').classList.add('hidden');
+        document.getElementById('game-screen').classList.add('hidden'); // Asegurar que el juego se oculta
+        document.getElementById('lobby-screen').classList.remove('hidden');
+        document.getElementById('display-user').innerText = user;
+        mostrarError("");
+    }
+
+    function mostrarJuego(gameId, textoInfo) {
+        document.getElementById('lobby-screen').classList.add('hidden');
+        document.getElementById('game-screen').classList.remove('hidden');
+        document.getElementById('current-game-id').innerText = gameId;
+        document.getElementById('game-info').innerText = textoInfo;
+    }
+
+    function mostrarError(msg) {
+        document.getElementById('error-msg').innerText = msg;
+    }
+
+    /* --- FUNCIONES DE SOCKET --- */
+    function conectarSocket(authToken) {
+        // Si ya existe socket, lo desconectamos para evitar duplicados
+        if(socket) socket.disconnect();
+
+        socket = io({ auth: { token: authToken } });
+
+        socket.on('connect', () => {
+            console.log("Conectado WS");
+            socket.emit('obtener_partidas');
+        });
+
+        socket.on('partida_en_curso', (data) => {
+            let mensaje = "";
+            if(data.estado === 'esperando') {
+                mensaje = "Recuperando sesión... Esperando oponente.";
+            } else {
+                mensaje = "Recuperando sesión... ¡Partida en curso!";
+            }
+            mostrarJuego(data.gameId, mensaje);
+            alert("Tenías una partida sin terminar. Te hemos vuelto a meter en ella.");
+        });
+
+        // Ver partidas disponibles
+        socket.on('lista_partidas', (partidas) => {
+            const lista = document.getElementById('lista-partidas');
+            lista.innerHTML = "";
+            
+            if(partidas.length === 0) {
+                lista.innerHTML = "<li>No hay partidas esperando.</li>";
+                return;
+            }
+
+            partidas.forEach(p => {
+                if(p.Jugador1.username === currentUser) return; // No mostrar la mía propia
+
+                const li = document.createElement('li');
+                li.className = 'game-item';
+                li.innerHTML = `
+                    <span>Vs <b>${p.Jugador1.username}</b></span>
+                    <button onclick="unirsePartida(${p.id})">Unirse</button>
+                `;
+                lista.appendChild(li);
+            });
+        });
+
+        // Eventos de creación/unión
+        socket.on('partida_creada', (data) => {
+            mostrarJuego(data.gameId, data.mensaje);
+        });
+
+        socket.on('partida_empezada', (data) => {
+            mostrarJuego(data.gameId, "¡JUGANDO contra " + data.oponente + "!");
+        });
+
+        socket.on('error', (msg) => {
+            alert("Error: " + msg);
+            // Si el error es que ya tengo partida, a lo mejor quiero volver al juego
+        });
+
+        // --- EVENTOS DE ABANDONO (AÑADIDOS) ---
+        socket.on('abandono_exitoso', () => {
+            alert("Has abandonado la partida.");
+            mostrarLobby(currentUser);
+            socket.emit('obtener_partidas');
+        });
+
+        socket.on('partida_terminada', (data) => {
+            alert(data.mensaje); // Mensaje de victoria o derrota
+            mostrarLobby(currentUser);
+            socket.emit('obtener_partidas');
+        });
+    }
+
+    /* --- ACCIONES DEL JUGADOR --- */
+    function crearPartida(tipo) {
+        socket.emit('crear_partida', tipo);
+    }
+
+    function unirsePartida(gameId) {
+        socket.emit('unirse_partida', gameId);
+    }
+
+    function abandonarPartida() {
+        if(confirm("¿Seguro que quieres abandonar? Contará como derrota.")) {
+            socket.emit('abandonar_partida');
+        }
+    }
+</script>
 </body>
 </html>
