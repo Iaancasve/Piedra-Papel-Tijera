@@ -1,9 +1,8 @@
 const express = require('express');
 const http = require('http');
-const { Server } = require('socket.io');
+const { Server } = require("socket.io");
 const jwt = require('jsonwebtoken');
 const { Op } = require('sequelize');
-
 const sequelize = require('./config/db');
 const User = require('./models/User');
 const Game = require('./models/Game');
@@ -12,275 +11,309 @@ const app = express();
 const server = http.createServer(app);
 
 const io = new Server(server, {
-    cors: { origin: '*' }
-});
-
-app.use(express.json());
-app.use(express.static('public'));
-app.use('/api/auth', require('./routes/authRoutes'));
-
-/* Middleware de autenticación WebSocket */
-io.use((socket, next) => {
-    try {
-        socket.user = jwt.verify(
-            socket.handshake.auth.token,
-            'mi_secreto_super_seguro'
-        );
-        next();
-    } catch {
-        next(new Error('Token inválido'));
+    cors: {
+        origin: "*",
+        methods: ["GET", "POST"]
     }
 });
 
-const movimientos = {}; // Jugadas temporales por partida
+const movimientos = {};
+
+app.use(express.json());
+app.use(express.static('public'));
+
+app.use('/api/auth', require('./routes/authRoutes'));
+
+io.use((socket, next) => {
+    const token = socket.handshake.auth.token;
+    if (!token) {
+        return next(new Error("Acceso denegado: Falta token"));
+    }
+
+    try {
+        const decoded = jwt.verify(token, 'mi_secreto_super_seguro');
+        socket.user = decoded;
+        next();
+    } catch (err) {
+        next(new Error("Token inválido"));
+    }
+});
 
 io.on('connection', (socket) => {
     const userId = socket.user.id;
+    const username = socket.user.username;
+    console.log(`Usuario conectado: ${username}`);
 
+    // 1. ENVIAR RANKING AL CONECTAR
     enviarRanking(io);
 
-    /* Recuperar partida activa si existe */
     (async () => {
-        const partida = await Game.findOne({
+        const partidaPendiente = await Game.findOne({
             where: {
-                [Op.or]: [
-                    { jugador1Id: userId },
-                    { jugador2Id: userId }
-                ],
+                [Op.or]: [{ jugador1Id: userId }, { jugador2Id: userId }],
                 estado: ['esperando', 'jugando']
             }
         });
 
-        if (partida) {
-            socket.join(`partida_${partida.id}`);
+        if (partidaPendiente) {
+            socket.join(`partida_${partidaPendiente.id}`);
             socket.emit('partida_en_curso', {
-                gameId: partida.id,
-                tipo: partida.tipo,
-                estado: partida.estado,
-                jugador1Id: partida.jugador1Id
+                gameId: partidaPendiente.id,
+                tipo: partidaPendiente.tipo,
+                estado: partidaPendiente.estado,
+                jugador1Id: partidaPendiente.jugador1Id
             });
         }
     })();
 
     socket.on('obtener_partidas', async () => {
-        const partidas = await Game.findAll({
-            where: { estado: 'esperando', tipo: 'humano' },
-            include: [{ model: User, as: 'Jugador1', attributes: ['username'] }]
-        });
-        socket.emit('lista_partidas', partidas);
+        try {
+            const partidas = await Game.findAll({
+                where: { estado: 'esperando', tipo: 'humano' },
+                include: [{ model: User, as: 'Jugador1', attributes: ['username'] }]
+            });
+            socket.emit('lista_partidas', partidas);
+        } catch (error) {
+            console.error(error);
+        }
     });
 
     socket.on('crear_partida', async (tipo) => {
-        const existe = await Game.findOne({
-            where: {
-                [Op.or]: [
-                    { jugador1Id: userId },
-                    { jugador2Id: userId }
-                ],
-                estado: ['esperando', 'jugando']
-            }
-        });
-
-        if (existe) return socket.emit('error', 'Ya tienes partida.');
-
-        const game = await Game.create({
-            tipo,
-            estado: tipo === 'cpu' ? 'jugando' : 'esperando',
-            jugador1Id: userId
-        });
-
-        socket.join(`partida_${game.id}`);
-
-        if (tipo === 'humano') {
-            io.emit('lista_partidas', await Game.findAll({
-                where: { estado: 'esperando', tipo: 'humano' },
-                include: [{ model: User, as: 'Jugador1' }]
-            }));
-            socket.emit('partida_creada', {
-                mensaje: 'Esperando...',
-                gameId: game.id
+        try {
+            const partidaAbierta = await Game.findOne({
+                where: {
+                    [Op.or]: [{ jugador1Id: userId }, { jugador2Id: userId }],
+                    estado: ['esperando', 'jugando']
+                }
             });
-        } else {
-            socket.emit('partida_empezada', {
-                gameId: game.id,
-                oponente: 'CPU',
+
+            if (partidaAbierta) {
+                return socket.emit('error', 'Ya tienes una partida en curso.');
+            }
+
+            const estadoInicial = (tipo === 'cpu') ? 'jugando' : 'esperando';
+
+            const nuevaPartida = await Game.create({
+                tipo: tipo,
+                estado: estadoInicial,
                 jugador1Id: userId
             });
+
+            socket.join(`partida_${nuevaPartida.id}`);
+
+            if (tipo === 'humano') {
+                const partidasDisponibles = await Game.findAll({
+                    where: { estado: 'esperando', tipo: 'humano' },
+                    include: [{ model: User, as: 'Jugador1', attributes: ['username'] }]
+                });
+                io.emit('lista_partidas', partidasDisponibles);
+                socket.emit('partida_creada', { mensaje: 'Esperando oponente...', gameId: nuevaPartida.id });
+            } else {
+                socket.emit('partida_empezada', {
+                    gameId: nuevaPartida.id,
+                    oponente: 'CPU',
+                    jugador1Id: userId
+                });
+            }
+        } catch (error) {
+            console.error(error);
+            socket.emit('error', 'Error al crear partida');
         }
     });
 
     socket.on('unirse_partida', async (gameId) => {
-        const game = await Game.findByPk(gameId);
-        if (!game || game.estado !== 'esperando') {
-            return socket.emit('error', 'No disponible.');
-        }
+        try {
+            const partidaAbierta = await Game.findOne({
+                where: {
+                    [Op.or]: [{ jugador1Id: userId }, { jugador2Id: userId }],
+                    estado: ['esperando', 'jugando']
+                }
+            });
 
-        game.jugador2Id = userId;
-        game.estado = 'jugando';
-        await game.save();
+            if (partidaAbierta) return socket.emit('error', 'Ya tienes una partida en curso.');
 
-        socket.join(`partida_${gameId}`);
-
-        io.to(`partida_${gameId}`).emit('partida_empezada', {
-            gameId,
-            oponente: 'Humano',
-            jugador1Id: game.jugador1Id
-        });
-
-        io.emit('lista_partidas', await Game.findAll({
-            where: { estado: 'esperando', tipo: 'humano' },
-            include: [{ model: User, as: 'Jugador1' }]
-        }));
-    });
-
-    socket.on('jugada', async (op) => {
-        const game = await Game.findOne({
-            where: {
-                [Op.or]: [
-                    { jugador1Id: userId },
-                    { jugador2Id: userId }
-                ],
-                estado: 'jugando'
+            const partida = await Game.findByPk(gameId);
+            if (!partida || partida.estado !== 'esperando') {
+                return socket.emit('error', 'Esa partida ya no está disponible');
             }
-        });
 
-        if (!game) return;
+            partida.jugador2Id = userId;
+            partida.estado = 'jugando';
+            await partida.save();
 
-        movimientos[game.id] ||= {};
-        const esP1 = game.jugador1Id === userId;
-        movimientos[game.id][esP1 ? 'p1' : 'p2'] = op;
+            socket.join(`partida_${gameId}`);
 
-        if (game.tipo === 'cpu') {
-            const cpuOp = ['piedra', 'papel', 'tijera']
-                [Math.floor(Math.random() * 3)];
-            await resolverRonda(game, movimientos[game.id].p1, cpuOp, io);
-        } else if (movimientos[game.id].p1 && movimientos[game.id].p2) {
-            await resolverRonda(
-                game,
-                movimientos[game.id].p1,
-                movimientos[game.id].p2,
-                io
-            );
-        } else {
-            socket.emit('esperando_rival', `Elegiste ${op}.`);
-            socket.to(`partida_${game.id}`)
-                  .emit('oponente_listo', 'Rival listo');
+            io.to(`partida_${gameId}`).emit('partida_empezada', {
+                gameId: gameId,
+                oponente: 'Humano',
+                jugador1Id: partida.jugador1Id
+            });
+
+            const partidasDisponibles = await Game.findAll({
+                where: { estado: 'esperando', tipo: 'humano' },
+                include: [{ model: User, as: 'Jugador1', attributes: ['username'] }]
+            });
+            io.emit('lista_partidas', partidasDisponibles);
+        } catch (error) {
+            console.error(error);
+            socket.emit('error', 'Error al unirse');
         }
     });
 
     socket.on('abandonar_partida', async () => {
-        const game = await Game.findOne({
-            where: {
-                [Op.or]: [
-                    { jugador1Id: userId },
-                    { jugador2Id: userId }
-                ],
-                estado: ['esperando', 'jugando']
+        try {
+            const partida = await Game.findOne({
+                where: {
+                    [Op.or]: [{ jugador1Id: userId }, { jugador2Id: userId }],
+                    estado: ['esperando', 'jugando']
+                }
+            });
+
+            if (partida) {
+                partida.estado = 'finalizada';
+                partida.ganadorId = (partida.jugador1Id === userId) ? partida.jugador2Id : partida.jugador1Id;
+                await partida.save();
+
+                io.to(`partida_${partida.id}`).emit('partida_terminada', {
+                    mensaje: 'El oponente ha abandonado la partida. ¡Ganaste!'
+                });
+
+                socket.leave(`partida_${partida.id}`);
+                socket.emit('abandono_exitoso');
+                
+                // 2. ACTUALIZAR RANKING AL ABANDONAR
+                enviarRanking(io);
             }
-        });
+        } catch (error) {
+            console.error(error);
+        }
+    });
 
-        if (!game) return;
+    socket.on('jugada', async (opcion) => {
+        try {
+            const partida = await Game.findOne({
+                where: {
+                    [Op.or]: [{ jugador1Id: userId }, { jugador2Id: userId }],
+                    estado: 'jugando'
+                }
+            });
 
-        game.estado = 'finalizada';
-        game.ganadorId =
-            game.jugador1Id === userId
-                ? game.jugador2Id
-                : game.jugador1Id;
+            if (!partida) return;
 
-        await game.save();
+            const gameId = partida.id;
 
-        io.to(`partida_${game.id}`)
-          .emit('partida_terminada', { mensaje: 'Rival abandonó.' });
+            if (!movimientos[gameId]) {
+                movimientos[gameId] = { jugada1: null, jugada2: null };
+            }
 
-        socket.leave(`partida_${game.id}`);
-        socket.emit('abandono_exitoso');
-        enviarRanking(io);
+            let soyJugador1 = (partida.jugador1Id === userId);
+
+            if (soyJugador1) {
+                movimientos[gameId].jugada1 = opcion;
+            } else {
+                movimientos[gameId].jugada2 = opcion;
+            }
+
+            if (partida.tipo === 'cpu') {
+                const opcionesCPU = ['piedra', 'papel', 'tijera'];
+                const jugadaCPU = opcionesCPU[Math.floor(Math.random() * 3)];
+                movimientos[gameId].jugada2 = jugadaCPU;
+                await resolverRonda(partida, movimientos[gameId].jugada1, jugadaCPU);
+            } else {
+                if (movimientos[gameId].jugada1 && movimientos[gameId].jugada2) {
+                    await resolverRonda(partida, movimientos[gameId].jugada1, movimientos[gameId].jugada2);
+                } else {
+                    socket.emit('esperando_rival', 'Has elegido ' + opcion + '. Esperando al oponente...');
+                    socket.to(`partida_${gameId}`).emit('oponente_listo', '¡El oponente ya ha elegido!');
+                }
+            }
+        } catch (error) {
+            console.error(error);
+        }
+    });
+
+    socket.on('disconnect', () => {
+        console.log(`Usuario desconectado: ${username}`);
     });
 });
 
-/* Resolver ronda y fin de partida */
-async function resolverRonda(game, t1, t2, io) {
-    let win = null;
+async function resolverRonda(partida, tiro1, tiro2) {
+    let ganadorRonda = null;
 
-    if (t1 !== t2) {
-        win =
-            (t1 === 'piedra' && t2 === 'tijera') ||
-            (t1 === 'papel' && t2 === 'piedra') ||
-            (t1 === 'tijera' && t2 === 'papel')
-                ? 1
-                : 2;
+    if (tiro1 === tiro2) {
+        ganadorRonda = 'empate';
+    } else if (
+        (tiro1 === 'piedra' && tiro2 === 'tijera') ||
+        (tiro1 === 'papel' && tiro2 === 'piedra') ||
+        (tiro1 === 'tijera' && tiro2 === 'papel')
+    ) {
+        ganadorRonda = 1;
+        partida.puntosJugador1 += 1;
+    } else {
+        ganadorRonda = 2;
+        partida.puntosJugador2 += 1;
     }
 
-    if (win === 1) game.puntosJugador1++;
-    if (win === 2) game.puntosJugador2++;
+    await partida.save();
 
-    await game.save();
-
-    io.to(`partida_${game.id}`).emit('resultado_ronda', {
-        tiro1: t1,
-        tiro2: t2,
-        ganadorRonda: win || 'empate',
-        marcador: {
-            p1: game.puntosJugador1,
-            p2: game.puntosJugador2
-        }
+    io.to(`partida_${partida.id}`).emit('resultado_ronda', {
+        tiro1,
+        tiro2,
+        ganadorRonda,
+        marcador: { p1: partida.puntosJugador1, p2: partida.puntosJugador2 }
     });
 
-    delete movimientos[game.id];
+    if (movimientos[partida.id]) delete movimientos[partida.id];
 
-    if (game.puntosJugador1 >= 3 || game.puntosJugador2 >= 3) {
-        game.estado = 'finalizada';
-        game.ganadorId =
-            game.puntosJugador1 >= 3
-                ? game.jugador1Id
-                : game.jugador2Id;
+    if (partida.puntosJugador1 >= 3 || partida.puntosJugador2 >= 3) {
+        partida.estado = 'finalizada';
+        partida.ganadorId = (partida.puntosJugador1 >= 3) ? partida.jugador1Id : partida.jugador2Id;
+        await partida.save();
 
-        await game.save();
-
-        const j1 = await User.findByPk(game.jugador1Id);
+        const j1 = await User.findByPk(partida.jugador1Id);
         j1.partidasJugadas++;
-        if (game.puntosJugador1 >= 3) j1.partidasGanadas++;
+        if (ganadorRonda === 1) j1.partidasGanadas++;
         await j1.save();
 
-        if (game.tipo === 'humano') {
-            const j2 = await User.findByPk(game.jugador2Id);
+        if (partida.tipo === 'humano') {
+            const j2 = await User.findByPk(partida.jugador2Id);
             j2.partidasJugadas++;
-            if (game.puntosJugador2 >= 3) j2.partidasGanadas++;
+            if (ganadorRonda === 2) j2.partidasGanadas++;
             await j2.save();
         }
 
-        io.to(`partida_${game.id}`).emit('fin_partida', {
-            ganador:
-                game.puntosJugador1 >= 3
-                    ? 'Jugador 1'
-                    : 'Jugador 2/CPU'
+        io.to(`partida_${partida.id}`).emit('fin_partida', {
+            ganador: (ganadorRonda === 1) ? 'Jugador 1' : (partida.tipo === 'cpu' ? 'CPU' : 'Jugador 2')
         });
 
+        // 3. ACTUALIZAR RANKING AL ACABAR PARTIDA
         enviarRanking(io);
     }
 }
 
-/* Calcular y emitir ranking */
+// ESTA ES LA FUNCIÓN QUE FALTABA
 async function enviarRanking(io) {
-    const users = await User.findAll();
-
-    const ranking = users
-        .map(u => ({
+    try {
+        const users = await User.findAll();
+        const ranking = users.map(u => ({
             user: u.username,
             wins: u.partidasGanadas,
             total: u.partidasJugadas,
-            pct: u.partidasJugadas
-                ? ((u.partidasGanadas / u.partidasJugadas) * 100).toFixed(1)
-                : 0
-        }))
-        .sort((a, b) => b.pct - a.pct)
-        .slice(0, 10);
-
-    io.emit('ranking_actualizado', ranking);
+            pct: u.partidasJugadas > 0 ? ((u.partidasGanadas / u.partidasJugadas) * 100).toFixed(1) : "0.0"
+        }));
+        
+        // Ordenar y enviar Top 10
+        io.emit('ranking_actualizado', ranking.sort((a, b) => b.pct - a.pct).slice(0, 10));
+    } catch (e) {
+        console.error("Error ranking:", e);
+    }
 }
 
 sequelize.sync({ force: false }).then(() => {
-    server.listen(3000, () =>
-        console.log('Servidor en puerto 3000')
-    );
+    console.log("Tablas sincronizadas correctamente");
+    server.listen(3000, () => {
+        console.log('Servidor corriendo en http://localhost:3000');
+    });
+}).catch(error => {
+    console.error("Error al arrancar:", error);
 });

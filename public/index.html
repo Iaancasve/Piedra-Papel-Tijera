@@ -2,240 +2,391 @@
 <html lang="es">
 <head>
     <meta charset="UTF-8">
-    <title>Juego Node</title>
-
+    <title>Piedra Papel Tijera</title>
     <style>
         body {
-            font-family: sans-serif;
+            font-family: 'Segoe UI', sans-serif;
             padding: 20px;
-            background: #f4f4f4;
+            background-color: #f4f4f4;
         }
-        .hidden { display: none; }
-        .box {
+
+        .container {
+            max-width: 800px;
+            margin: 0 auto;
             background: white;
-            padding: 20px;
-            border-radius: 8px;
-            margin-bottom: 20px;
+            padding: 30px;
+            border-radius: 10px;
+            box-shadow: 0 4px 6px rgba(0,0,0,0.1);
         }
+
+        .hidden {
+            display: none;
+        }
+
+        input {
+            padding: 10px;
+            margin: 10px 0;
+            width: 100%;
+            box-sizing: border-box;
+            border: 1px solid #ccc;
+            border-radius: 4px;
+        }
+
         button {
-            padding: 8px 15px;
-            margin: 5px;
+            padding: 10px 20px;
             cursor: pointer;
+            margin: 5px;
+            border: none;
+            border-radius: 4px;
+            background-color: #007bff;
+            color: white;
+            font-size: 16px;
         }
+
+        button:hover {
+            background-color: #0056b3;
+        }
+
+        button:disabled {
+            background-color: #ccc;
+            cursor: not-allowed;
+        }
+
         .game-item {
-            border-bottom: 1px solid #ddd;
-            padding: 5px;
+            border: 1px solid #eee;
+            padding: 15px;
+            margin-bottom: 10px;
             display: flex;
             justify-content: space-between;
+            align-items: center;
+            background-color: #fafafa;
         }
+
         table {
             width: 100%;
             border-collapse: collapse;
-            margin-top: 10px;
-        }
-        th, td {
-            border: 1px solid #ddd;
-            padding: 8px;
+            margin-top: 20px;
             text-align: center;
         }
-    </style>
 
+        th, td {
+            border: 1px solid #ddd;
+            padding: 12px;
+        }
+
+        th {
+            background-color: #e9ecef;
+        }
+    </style>
     <script src="/socket.io/socket.io.js"></script>
 </head>
 <body>
 
-<div id="auth-screen" class="box">
-    <h2>Login</h2>
-    <input id="u" placeholder="User">
-    <input id="p" type="password" placeholder="Pass">
-    <br>
-    <button onclick="auth('login')">Entrar</button>
-    <button onclick="auth('register')">Registro</button>
-</div>
+<div class="container">
+    <h1 style="text-align: center;">Piedra, Papel, Tijera</h1>
 
-<div id="lobby-screen" class="hidden box">
-    <h2>
-        Lobby - Hola <span id="display-user"></span>
-        <button onclick="logout()">Salir</button>
-    </h2>
-
-    <button onclick="emit('crear_partida','cpu')">Vs CPU</button>
-    <button onclick="emit('crear_partida','humano')">Vs Humano</button>
-
-    <h3>Partidas disponibles</h3>
-    <div id="lista-partidas"></div>
-
-    <h3>🏆 Ranking Top 10</h3>
-    <table>
-        <thead>
-            <tr>
-                <th>User</th>
-                <th>% Wins</th>
-                <th>W/T</th>
-            </tr>
-        </thead>
-        <tbody id="ranking-body"></tbody>
-    </table>
-</div>
-
-<div id="game-screen" class="hidden box" style="text-align:center;">
-    <h2>En partida (<span id="oponente-name"></span>)</h2>
-
-    <div style="font-size:20px;">
-        YO: <b id="score-me">0</b> -
-        RIVAL: <b id="score-rival">0</b>
-    </div>
-
-    <div id="zona-juego">
+    <div id="auth-screen">
+        <h2>Acceso</h2>
+        <input type="text" id="u" placeholder="Nombre de usuario">
+        <input type="password" id="p" placeholder="Contraseña">
         <br>
-        <button onclick="emit('jugada','piedra')">🪨</button>
-        <button onclick="emit('jugada','papel')">📄</button>
-        <button onclick="emit('jugada','tijera')">✂️</button>
+        <button onclick="auth('login')">Entrar</button>
+        <button onclick="auth('register')" style="background-color: #6c757d;">Registrarse</button>
     </div>
 
-    <p id="status-msg" style="color:blue;font-weight:bold;"></p>
+    <div id="lobby-screen" class="hidden">
+        <div style="display: flex; justify-content: space-between; align-items: center;">
+            <h2>Hola, <span id="display-user"></span></h2>
+            <button onclick="logout()" style="background-color: #dc3545;">Cerrar Sesión</button>
+        </div>
+        
+        <hr>
 
-    <div id="fin-msg" class="hidden">
-        <h3>FIN DE PARTIDA</h3>
-        <button onclick="location.reload()">Volver</button>
+        <h3>Crear Partida</h3>
+        <button onclick="emit('crear_partida', 'cpu')">🤖 Vs CPU</button>
+        <button onclick="emit('crear_partida', 'humano')">👤 Vs Humano</button>
+        
+        <h3>Partidas Disponibles</h3>
+        <div id="lista-partidas">Cargando...</div>
+        
+        <h3>🏆 Ranking Top 10</h3>
+        <table>
+            <thead>
+                <tr>
+                    <th>Pos</th>
+                    <th>Usuario</th>
+                    <th>% Victorias</th>
+                    <th>Ganadas / Jugadas</th>
+                </tr>
+            </thead>
+            <tbody id="ranking-body">
+                </tbody>
+        </table>
     </div>
 
-    <br>
-    <button
-        style="background:red;color:white"
-        onclick="if(confirm('¿Salir?')) emit('abandonar_partida')"
-    >
-        Abandonar
-    </button>
+    <div id="game-screen" class="hidden" style="text-align: center;">
+        <h2>En Partida contra: <span id="op-name" style="color: #007bff;">...</span></h2>
+        
+        <div style="display: flex; justify-content: space-around; font-size: 1.5em; margin: 20px 0;">
+            <div>YO: <span id="s-me" style="font-weight: bold;">0</span></div>
+            <div>RIVAL: <span id="s-rival" style="font-weight: bold;">0</span></div>
+        </div>
+
+        <h3 id="status" style="color: blue; min-height: 30px;">Esperando...</h3>
+        
+        <div id="zona-juego" class="hidden">
+            <p>Elige tu jugada:</p>
+            <button onclick="emit('jugada','piedra')" style="font-size: 2em;">🪨</button>
+            <button onclick="emit('jugada','papel')" style="font-size: 2em;">📄</button>
+            <button onclick="emit('jugada','tijera')" style="font-size: 2em;">✂️</button>
+        </div>
+        
+        <div id="fin" class="hidden" style="background: #d4edda; padding: 20px; margin: 20px 0;">
+            <h3 id="msg-ganador">FIN DE PARTIDA</h3>
+            <button onclick="reload()">Volver al Lobby</button>
+        </div>
+        
+        <br>
+        <button onclick="abandonar()" style="background-color: #dc3545;">Abandonar Partida</button>
+    </div>
 </div>
 
 <script>
-let socket;
-let token = localStorage.getItem('token');
-let uid = localStorage.getItem('uid');
-let p1Id = null;
+    // Variables globales
+    let socket;
+    let token = localStorage.getItem('token');
+    let user = localStorage.getItem('user');
+    let uid = localStorage.getItem('uid');
+    let p1Id = null; // Para saber quién es el Jugador 1
 
-/* Esperar a que el DOM esté listo */
-window.onload = () => {
+    // Autoconexión si ya hay token guardado
     if (token) {
         show('lobby-screen');
-        document.getElementById('display-user').innerText =
-            localStorage.getItem('user');
+        document.getElementById('display-user').innerText = user;
         connect();
     }
-};
 
-async function auth(type) {
-    const u = document.getElementById('u').value;
-    const p = document.getElementById('p').value;
+    // Función de Login/Registro
+    async function auth(endpoint) {
+        const u = document.getElementById('u').value;
+        const p = document.getElementById('p').value;
 
-    const res = await fetch(`/api/auth/${type}`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ username: u, password: p })
-    });
+        if (!u || !p) return alert("Faltan datos");
 
-    const data = await res.json();
+        try {
+            const res = await fetch(`/api/auth/${endpoint}`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ username: u, password: p })
+            });
 
-    if (res.ok && type === 'login') {
-        localStorage.setItem('token', data.token);
-        localStorage.setItem('uid', data.userId);
-        localStorage.setItem('user', u);
-        token = data.token;
-        uid = data.userId;
+            const data = await res.json();
 
-        show('lobby-screen');
-        document.getElementById('display-user').innerText = u;
-        connect();
-    } else {
-        alert(data.message || data.error);
+            if (res.ok && endpoint === 'login') {
+                // Guardar datos
+                token = data.token;
+                uid = data.userId;
+                user = u;
+                localStorage.setItem('token', token);
+                localStorage.setItem('uid', uid);
+                localStorage.setItem('user', user);
+
+                // Cambiar pantalla
+                show('lobby-screen');
+                document.getElementById('display-user').innerText = user;
+                connect();
+            } else if (!res.ok) {
+                alert(data.error || 'Error en la petición');
+            } else {
+                alert('Registro exitoso. Ahora inicia sesión.');
+            }
+        } catch (e) {
+            console.error(e);
+            alert("Error de conexión con el servidor");
+        }
     }
-}
 
-function connect() {
-    if (socket) socket.disconnect();
-    socket = io({ auth: { token } });
+    // Función principal de WebSockets
+    function connect() {
+        if (socket) socket.disconnect();
 
-    socket.on('connect', () => emit('obtener_partidas'));
+        // Inicializar socket con el token
+        socket = io({
+            auth: { token: token }
+        });
 
-    socket.on('lista_partidas', list => {
-        document.getElementById('lista-partidas').innerHTML =
-            list.map(g => `
-                <div class="game-item">
-                    Vs ${g.Jugador1.username}
-                    <button onclick="emit('unirse_partida',${g.id})">
-                        Unirse
-                    </button>
-                </div>
-            `).join('');
-    });
+        // 1. Al conectar, pedimos la lista de partidas
+        socket.on('connect', () => {
+            console.log("Conectado al servidor");
+            emit('obtener_partidas');
+        });
 
-    socket.on('ranking_actualizado', rank => {
-        document.getElementById('ranking-body').innerHTML =
-            rank.map(r => `
-                <tr>
-                    <td>${r.user}</td>
-                    <td>${r.pct}%</td>
-                    <td>${r.wins}/${r.total}</td>
-                </tr>
-            `).join('');
-    });
+        // 2. Recibir lista de partidas (Lobby)
+        socket.on('lista_partidas', (lista) => {
+            const div = document.getElementById('lista-partidas');
+            if (lista.length === 0) {
+                div.innerHTML = "<p>No hay partidas esperando.</p>";
+            } else {
+                div.innerHTML = lista.map(p => `
+                    <div class="game-item">
+                        <span>Vs <b>${p.Jugador1.username}</b></span>
+                        <button onclick="emit('unirse_partida', ${p.id})">Unirse</button>
+                    </div>
+                `).join('');
+            }
+        });
 
-    socket.on('partida_creada', d =>
-        setupGame(d.gameId, d.mensaje, true)
-    );
+        // 3. Recibir Ranking (CORREGIDO: Ahora está dentro de connect)
+        socket.on('ranking_actualizado', (ranking) => {
+            const tbody = document.getElementById('ranking-body');
+            tbody.innerHTML = ranking.map((u, index) => {
+                const esMiUsuario = (u.user === user) ? 'font-weight: bold; background: #e8f0fe;' : '';
+                return `
+                    <tr style="${esMiUsuario}">
+                        <td>${index + 1}</td>
+                        <td>${u.user}</td>
+                        <td>${u.pct}%</td>
+                        <td>${u.wins} / ${u.total}</td>
+                    </tr>
+                `;
+            }).join('');
+        });
 
-    socket.on('partida_empezada', d => {
-        setupGame(d.gameId, '¡JUGANDO!', false);
-        p1Id = d.jugador1Id;
-        document.getElementById('oponente-name').innerText = d.oponente;
-    });
+        // 4. Eventos de inicio de partida
+        socket.on('partida_creada', (data) => {
+            setupGame(data.gameId, data.mensaje, true); // true = esperando (oculta tablero)
+        });
 
-    socket.on('resultado_ronda', d => {
-        const soyP1 = String(uid) === String(p1Id);
-        document.getElementById('score-me').innerText =
-            soyP1 ? d.marcador.p1 : d.marcador.p2;
-        document.getElementById('score-rival').innerText =
-            soyP1 ? d.marcador.p2 : d.marcador.p1;
-    });
+        socket.on('partida_empezada', (data) => {
+            p1Id = data.jugador1Id;
+            document.getElementById('op-name').innerText = data.oponente;
+            setupGame(data.gameId, "¡JUGANDO!", false); // false = jugando (muestra tablero)
+        });
 
-    socket.on('fin_partida', () => {
-        document.getElementById('zona-juego').classList.add('hidden');
-        document.getElementById('fin-msg').classList.remove('hidden');
-    });
+        socket.on('partida_en_curso', (data) => {
+            p1Id = data.jugador1Id;
+            const esperando = (data.estado === 'esperando');
+            const texto = esperando ? "Recuperando... Esperando rival" : "¡Partida recuperada!";
+            
+            setupGame(data.gameId, texto, esperando);
 
-    socket.on('partida_terminada', d => {
-        alert(d.mensaje);
+            if (!esperando) {
+                document.getElementById('op-name').innerText = (data.tipo === 'cpu' ? 'CPU' : 'Humano');
+            }
+        });
+
+        // 5. Eventos durante el juego
+        socket.on('esperando_rival', (msg) => {
+            document.getElementById('status').innerText = msg;
+        });
+
+        socket.on('oponente_listo', (msg) => {
+            document.getElementById('status').innerText = "⚠️ " + msg;
+        });
+
+        socket.on('resultado_ronda', (data) => {
+            // Determinar perspectiva (quién soy yo)
+            const soyP1 = (String(uid) === String(p1Id));
+            
+            // Actualizar marcador
+            document.getElementById('s-me').innerText = soyP1 ? data.marcador.p1 : data.marcador.p2;
+            document.getElementById('s-rival').innerText = soyP1 ? data.marcador.p2 : data.marcador.p1;
+
+            // Mensaje de resultado
+            let texto = `Tú: ${soyP1 ? data.tiro1 : data.tiro2} vs Rival: ${soyP1 ? data.tiro2 : data.tiro1}. `;
+            
+            if (data.ganadorRonda === 'empate') {
+                texto += "¡EMPATE!";
+            } else {
+                // Gané si (ganó 1 y soy 1) O (ganó 2 y soy 2)
+                const gane = (data.ganadorRonda === 1 && soyP1) || (data.ganadorRonda === 2 && !soyP1);
+                texto += gane ? "¡PUNTO PARA TI!" : "¡Punto para el rival!";
+            }
+            
+            document.getElementById('status').innerText = texto;
+
+            // Bloquear botones brevemente
+            toggleBtns(false);
+            setTimeout(() => {
+                toggleBtns(true);
+                document.getElementById('status').innerText += " -> ¡Siguiente ronda!";
+            }, 2000);
+        });
+
+        // 6. Fin de partida
+        socket.on('fin_partida', (data) => {
+            document.getElementById('zona-juego').classList.add('hidden');
+            document.getElementById('fin').classList.remove('hidden');
+            document.getElementById('msg-ganador').innerText = "GANADOR: " + data.ganador;
+        });
+
+        // 7. Errores y abandonos
+        socket.on('abandono_exitoso', reload);
+        
+        socket.on('partida_terminada', (data) => {
+            alert(data.mensaje);
+            reload();
+        });
+
+        socket.on('error', (msg) => alert(msg));
+    }
+
+    // --- Funciones Auxiliares ---
+
+    function emit(event, data) {
+        if (socket) socket.emit(event, data);
+    }
+
+    function logout() {
+        localStorage.clear();
+        reload();
+    }
+
+    function reload() {
         location.reload();
-    });
-}
-
-function emit(ev, data) {
-    socket.emit(ev, data);
-}
-
-function logout() {
-    localStorage.clear();
-    location.reload();
-}
-
-function show(id) {
-    ['auth-screen','lobby-screen','game-screen']
-        .forEach(s => document.getElementById(s).classList.add('hidden'));
-    document.getElementById(id).classList.remove('hidden');
-}
-
-function setupGame(id, msg, waiting) {
-    show('game-screen');
-    document.getElementById('status-msg').innerText = msg;
-
-    if (waiting) {
-        document.getElementById('zona-juego').classList.add('hidden');
-        document.getElementById('oponente-name').innerText = 'Esperando...';
-    } else {
-        document.getElementById('zona-juego').classList.remove('hidden');
     }
-}
+
+    function abandon() {
+        if (confirm('¿Seguro que quieres abandonar? Contará como derrota.')) {
+            emit('abandonar_partida');
+        }
+    }
+    
+    // Asignar función al botón (wrapper para HTML)
+    function abandonar() {
+        if(confirm("¿Abandonar?")) emit('abandonar_partida');
+    }
+
+    function toggleBtns(activar) {
+        const btns = document.querySelectorAll('#zona-juego button');
+        btns.forEach(b => b.disabled = !activar);
+    }
+
+    function show(screenId) {
+        // Ocultar todas las pantallas
+        ['auth-screen', 'lobby-screen', 'game-screen'].forEach(id => {
+            document.getElementById(id).classList.add('hidden');
+        });
+        // Mostrar la deseada
+        document.getElementById(screenId).classList.remove('hidden');
+    }
+
+    function setupGame(gameId, msg, isWaiting) {
+        show('game-screen');
+        document.getElementById('status').innerText = msg;
+        
+        // Si estamos esperando, ocultamos botones. Si jugamos, los mostramos.
+        const zonaJuego = document.getElementById('zona-juego');
+        if (isWaiting) {
+            zonaJuego.classList.add('hidden');
+            document.getElementById('op-name').innerText = "Esperando...";
+        } else {
+            zonaJuego.classList.remove('hidden');
+        }
+        
+        // Resetear UI de fin de partida
+        document.getElementById('fin').classList.add('hidden');
+    }
 </script>
 
 </body>
